@@ -1,0 +1,515 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Live Location Detector</title>
+<link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css">
+<style>
+  :root {
+    --teal: #0d9488; --teal-dark: #0f766e; --blue: #2563eb;
+    --bg: #f4f8fb; --card: #ffffff; --text: #1f2937; --muted: #6b7280;
+    --border: #d5dee8; --err: #b42318;
+  }
+  * { box-sizing: border-box; }
+  [hidden] { display: none !important; }
+  body { margin: 0; font-family: system-ui, -apple-system, "Segoe UI", Roboto, Arial, sans-serif;
+         background: var(--bg); color: var(--text); }
+  .container { max-width: 900px; margin: 0 auto; padding: 20px 16px 40px; }
+  h1 { text-align: center; color: var(--teal-dark); margin: 8px 0 4px; }
+  .subtitle { text-align: center; color: var(--muted); margin: 0 0 20px; font-size: .95rem; }
+  .card { background: var(--card); border: 1px solid var(--border); border-radius: 16px;
+          padding: 18px; margin-bottom: 16px; box-shadow: 0 2px 8px rgba(15,23,42,.05); }
+  .fields { display: grid; grid-template-columns: 2fr 1fr; gap: 12px; }
+  label { display: block; font-weight: 600; font-size: .9rem; margin-bottom: 6px; }
+  input { width: 100%; padding: 12px 14px; border: 1px solid var(--border);
+          border-radius: 12px; font-size: 1rem; background: #fff; color: var(--text); }
+  input:focus { outline: 2px solid var(--blue); outline-offset: 1px; }
+  input:disabled { background: #eef2f6; }
+  .buttons { display: flex; flex-wrap: wrap; gap: 10px; margin-top: 14px; }
+  button { border: 0; border-radius: 999px; padding: 12px 20px; font-size: .95rem;
+           font-weight: 600; cursor: pointer; }
+  button:disabled { opacity: .5; cursor: not-allowed; }
+  .btn-primary { background: var(--teal); color: #fff; }
+  .btn-secondary { background: var(--blue); color: #fff; }
+  .btn-outline { background: #fff; color: var(--teal-dark); border: 1px solid var(--teal); }
+  .btn-danger { background: #fff; color: var(--err); border: 1px solid var(--err); }
+  .status-row { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+  .pill { display: inline-block; padding: 6px 14px; border-radius: 999px; font-size: .9rem; font-weight: 600; }
+  .pill.off  { background: #eef2f6; color: #475569; }
+  .pill.wait { background: #e8f0fe; color: #1d4ed8; }
+  .pill.ok   { background: #e6f7f2; color: #0f766e; }
+  .pill.bad  { background: #fdecec; color: var(--err); }
+  .msg { margin-top: 12px; padding: 12px 14px; border-radius: 12px; font-size: .95rem; }
+  .msg.success { background: #e6f7f2; color: #0f766e; }
+  .msg.error   { background: #fdecec; color: var(--err); }
+  .msg.loading { background: #e8f0fe; color: #1d4ed8; }
+  .code-box { margin-top: 14px; padding: 14px; border: 2px dashed var(--teal);
+              border-radius: 14px; text-align: center; background: #f0fbf9; }
+  .code-box .code { font-size: 2rem; letter-spacing: .4rem; font-weight: 700; color: var(--teal-dark); }
+  .code-box small { color: var(--muted); }
+  .grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 12px; }
+  .stat { background: #f8fafc; border: 1px solid var(--border); border-radius: 12px; padding: 12px; }
+  .stat span { display: block; color: var(--muted); font-size: .8rem; margin-bottom: 4px; }
+  .stat strong { font-size: 1rem; word-break: break-word; }
+  #map { height: 360px; border-radius: 14px; border: 1px solid var(--border); margin-top: 14px; }
+  .note { color: var(--muted); font-size: .85rem; text-align: center; }
+  @media (max-width: 560px) {
+    .fields { grid-template-columns: 1fr; }
+    button { width: 100%; }
+    #map { height: 300px; }
+  }
+</style>
+</head>
+<body>
+<div class="container">
+  <h1>Live Location Detector</h1>
+  <p class="subtitle">Consent-based live location sharing. Nothing is shared unless the owner starts it.</p>
+
+  <div class="card">
+    <div class="fields">
+      <div>
+        <label for="phone">Mobile contact number</label>
+        <input id="phone" type="tel" inputmode="tel" placeholder="e.g. 9876543210 or +919876543210" autocomplete="off">
+      </div>
+      <div>
+        <label for="code">Share code (to view)</label>
+        <input id="code" type="text" inputmode="numeric" maxlength="6" placeholder="6 digits" autocomplete="off">
+      </div>
+    </div>
+
+    <div class="buttons">
+      <button id="shareBtn" class="btn-primary">Share My Location</button>
+      <button id="findBtn" class="btn-secondary">Find Shared Location</button>
+      <button id="stopBtn" class="btn-danger" disabled>Stop Sharing</button>
+    </div>
+
+    <div id="shareBox" class="code-box" hidden>
+  <div class="code" id="shareCode">------</div>
+  <small>Give this code only to the person you want to see your location.</small>
+  <p style="margin:10px 0 4px;"><small>Or send this link instead:</small></p>
+  <input id="shareLink" readonly style="font-size:.85rem;" onclick="this.select()">
+</div>
+
+    <div id="message" class="msg" hidden></div>
+    <div id="alertBox" class="msg error" hidden></div>  
+  </div>
+
+  <div class="card">
+    <div class="status-row">
+      <strong>Status:</strong>
+      <span id="status" class="pill off">Not sharing</span>
+    </div>
+
+    <div class="grid" style="margin-top:14px;">
+      <div class="stat"><span>Latitude</span><strong id="lat">—</strong></div>
+      <div class="stat"><span>Longitude</span><strong id="lng">—</strong></div>
+      <div class="stat"><span>Accuracy</span><strong id="acc">—</strong></div>
+      <div class="stat"><span>Last update</span><strong id="time">—</strong></div>
+    </div>
+
+    <div class="buttons">
+      <button id="mapsBtn" class="btn-outline" disabled>Open in Google Maps</button>
+    </div>
+
+    <div id="map"></div>
+  </div>
+
+  <p class="note">Learning demo. Locations are kept only in server memory, only the latest point, and are deleted when sharing stops.</p>
+</div>
+
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+<script>
+"use strict";
+
+// ---------- Settings ----------
+const SEND_INTERVAL_MS = 5000;   // how often the sharer sends the latest GPS fix
+const POLL_INTERVAL_MS = 5000;   // how often the viewer asks for the latest location
+
+// ---------- Page elements ----------
+const $ = (id) => document.getElementById(id);
+const phoneInput = $("phone"), codeInput = $("code");
+const shareBtn = $("shareBtn"), findBtn = $("findBtn"), stopBtn = $("stopBtn"), mapsBtn = $("mapsBtn");
+const shareBox = $("shareBox"), shareCodeEl = $("shareCode");
+const statusEl = $("status"), messageEl = $("message");
+const alertBox = $("alertBox");
+const latEl = $("lat"), lngEl = $("lng"), accEl = $("acc"), timeEl = $("time");
+
+// ---------- State ----------
+let mode = "idle";            // "idle" | "sharing" | "viewing"
+let watchId = null;           // id from watchPosition
+let timerId = null;           // interval for sending (owner) or polling (viewer)
+let latestPosition = null;    // newest GPS fix {lat, lng, acc}
+let ownerSession = null;      // {phone, token} while sharing
+let viewSession = null;       // {phone, code} while viewing
+let sending = false;
+let currentCoords = null;
+let map = null, marker = null, accuracyCircle = null;
+
+// ---------- Small helpers ----------
+function setStatus(text, kind) {
+  statusEl.textContent = text;
+  statusEl.className = "pill " + kind;      // off | wait | ok | bad
+}
+
+function setMessage(text, kind) {
+  if (!text) { messageEl.hidden = true; return; }
+  messageEl.textContent = text;             // textContent (not innerHTML) keeps it safe
+  messageEl.className = "msg " + kind;      // success | error | loading
+  messageEl.hidden = false;
+}
+const ALERT_TEXT = {
+  wrong_code: "Someone entered a WRONG share code for your number.",
+  locked: "Someone made too many wrong attempts and was locked out.",
+  takeover_attempt: "Someone tried to share using YOUR number.",
+  viewed: "Someone viewed your location with the correct code."
+};
+
+function showAlerts(alerts) {
+  if (!alerts || !alerts.length) return;
+  const lines = alerts.map((a) =>
+    "⚠ " + (ALERT_TEXT[a.type] || a.type) + " (" + new Date(a.time * 1000).toLocaleTimeString() + ")");
+  alertBox.textContent = lines.join("  |  ");
+  alertBox.hidden = false;
+}
+
+function getCookie(name) {
+  const parts = document.cookie.split(";").map((c) => c.trim());
+  for (const part of parts) {
+    if (part.startsWith(name + "=")) return decodeURIComponent(part.substring(name.length + 1));
+  }
+  return "";
+}
+
+function readPhone() {
+  const phone = phoneInput.value.replace(/[\s\-()]/g, "");
+  if (!/^\+?[0-9]{10,15}$/.test(phone)) {
+    setMessage("Enter a valid mobile number (10 to 15 digits, optional leading +).", "error");
+    phoneInput.focus();
+    return null;
+  }
+  return phone;
+}
+
+function updateButtons() {
+  const active = mode !== "idle";
+  shareBtn.disabled = active;
+  findBtn.disabled = active;
+  stopBtn.disabled = !active;
+  phoneInput.disabled = active;
+  codeInput.disabled = active;
+  stopBtn.textContent = mode === "viewing" ? "Stop Viewing" : "Stop Sharing";
+}
+
+// Wrapper around fetch: always returns parsed JSON or throws an Error with a clear message.
+async function api(url, options) {
+  let res;
+  try {
+    res = await fetch(url, options);
+  } catch (e) {
+    throw new Error("Cannot reach the server. Is the Django server still running?");
+  }
+  let data = null;
+  try { data = await res.json(); } catch (e) { /* not JSON */ }
+  if (!data) {
+    const err = new Error(res.status === 403
+      ? "Security check (CSRF) failed. Reload this page from http://127.0.0.1:8000/ and try again."
+      : "Server error (" + res.status + "). Check the Django terminal for details.");
+    err.status = res.status;
+    throw err;
+  }
+  if (!res.ok || !data.ok) {
+    const err = new Error(data.error || "Request failed (" + res.status + ").");
+    err.status = res.status;
+    throw err;
+  }
+  return data;
+}
+
+function postJson(url, body, keepalive) {
+  return api(url, {
+    method: "POST",
+    headers: { "Content-Type": "application/json", "X-CSRFToken": getCookie("csrftoken") },
+    body: JSON.stringify(body),
+    keepalive: !!keepalive
+  });
+}
+
+function sendStop(session, keepalive) {
+  return postJson("/api/stop/", { phone: session.phone, owner_token: session.token }, keepalive);
+}
+
+// ---------- Map ----------
+function initMap() {
+  if (typeof L === "undefined") {
+    setMessage("The map library could not be loaded (check your internet connection). Coordinates will still work.", "error");
+    return;
+  }
+  map = L.map("map").setView([20.5937, 78.9629], 4);
+  L.tileLayer("https://tile.openstreetmap.org/{z}/{x}/{y}.png", {
+    maxZoom: 19,
+    attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors'
+  }).addTo(map);
+}
+
+function showLocation(lat, lng, acc, updatedAtSeconds) {
+  currentCoords = { lat: lat, lng: lng };
+  latEl.textContent = lat.toFixed(6);
+  lngEl.textContent = lng.toFixed(6);
+  accEl.textContent = Math.round(acc) + " m";
+  timeEl.textContent = new Date(updatedAtSeconds * 1000).toLocaleString();
+  mapsBtn.disabled = false;
+
+  if (!map) return;
+  const pos = [lat, lng];
+  if (!marker) {
+    marker = L.marker(pos).addTo(map);
+    accuracyCircle = L.circle(pos, { radius: acc, color: "#0d9488", weight: 1, fillOpacity: 0.1 }).addTo(map);
+    map.setView(pos, 16);
+  } else {
+    marker.setLatLng(pos);
+    accuracyCircle.setLatLng(pos);
+    accuracyCircle.setRadius(acc);
+    map.panTo(pos);
+  }
+}
+
+function clearLocation() {
+  currentCoords = null;
+  latEl.textContent = lngEl.textContent = accEl.textContent = timeEl.textContent = "—";
+  mapsBtn.disabled = true;
+  if (map && marker) {
+    map.removeLayer(marker);
+    map.removeLayer(accuracyCircle);
+    marker = null;
+    accuracyCircle = null;
+  }
+}
+
+// ---------- Reset everything to the idle state ----------
+function resetState() {
+  if (watchId !== null) { navigator.geolocation.clearWatch(watchId); watchId = null; }
+  if (timerId !== null) { clearInterval(timerId); timerId = null; }
+  mode = "idle";
+  latestPosition = null;
+  ownerSession = null;
+  viewSession = null;
+  sending = false;
+  shareBox.hidden = true;
+  alertBox.hidden = true;   
+  shareCodeEl.textContent = "------";
+  clearLocation();
+  updateButtons();
+  setStatus("Not sharing", "off");
+}
+
+// ---------- Owner side: share location ----------
+async function checkPermission() {
+  if (!navigator.permissions) return "unknown";
+  try {
+    const result = await navigator.permissions.query({ name: "geolocation" });
+    return result.state;               // "granted" | "prompt" | "denied"
+  } catch (e) {
+    return "unknown";
+  }
+}
+
+async function startSharing() {
+  const phone = readPhone();
+  if (!phone) return;
+
+  if (!("geolocation" in navigator)) {
+    setStatus("Geolocation not supported", "bad");
+    setMessage("This browser does not support location access. Try a current version of Chrome, Edge, Firefox or Safari.", "error");
+    return;
+  }
+
+  const permission = await checkPermission();
+  if (permission === "denied") {
+    setStatus("Location permission denied", "bad");
+    setMessage("Location is blocked for this site. Click the lock icon in the address bar, set Location to Allow, then try again.", "error");
+    return;
+  }
+
+  mode = "sharing";
+  ownerSession = { phone: phone, token: null };
+  updateButtons();
+  setStatus("Waiting for permission / GPS…", "wait");
+  setMessage("Your browser may ask for location permission. Choose Allow.", "loading");
+
+  watchId = navigator.geolocation.watchPosition(onPosition, onGeoError, {
+    enableHighAccuracy: true,
+    maximumAge: 0,
+    timeout: 15000
+  });
+}
+
+function onPosition(position) {
+  latestPosition = {
+    lat: position.coords.latitude,
+    lng: position.coords.longitude,
+    acc: position.coords.accuracy
+  };
+  setStatus("GPS enabled · permission granted", "ok");
+  if (timerId === null) {              // first fix: send immediately, then every few seconds
+    sendLatest();
+    timerId = setInterval(sendLatest, SEND_INTERVAL_MS);
+  }
+}
+
+function onGeoError(error) {
+  if (error.code === 1) {              // PERMISSION_DENIED
+    const session = ownerSession;
+    resetState();
+    if (session && session.token) sendStop(session).catch(() => {});
+    setStatus("Location permission denied", "bad");
+    setMessage("Permission was denied. Click the lock icon in the address bar, set Location to Allow, then click Share My Location again.", "error");
+  } else if (error.code === 2) {       // POSITION_UNAVAILABLE
+    setStatus("GPS / location unavailable", "bad");
+    setMessage("The device could not find its location. Turn on GPS / Location Services and check your signal.", "error");
+  } else {                             // TIMEOUT
+    setStatus("GPS timed out, still trying…", "wait");
+    setMessage("Getting a GPS fix is taking a while. Try moving near a window.", "error");
+  }
+}
+
+async function sendLatest() {
+  const session = ownerSession;
+  if (mode !== "sharing" || !latestPosition || sending) return;
+  sending = true;
+  try {
+    const body = {
+      phone: session.phone,
+      latitude: latestPosition.lat,
+      longitude: latestPosition.lng,
+      accuracy: latestPosition.acc
+    };
+    if (session.token) body.owner_token = session.token;
+
+    const data = await postJson("/api/share/", body);
+
+    if (ownerSession !== session) {    // user pressed Stop while the request was in flight
+      if (data.owner_token) sendStop({ phone: session.phone, token: data.owner_token }).catch(() => {});
+      return;
+    }
+    if (data.owner_token) session.token = data.owner_token;
+    showAlerts(data.alerts);   
+    shareCodeEl.textContent = data.view_code;
+document.getElementById("shareLink").value =
+  window.location.origin + "/?phone=" + encodeURIComponent(session.phone) + "&code=" + data.view_code;   // NEW
+    shareBox.hidden = false;
+    showLocation(data.latitude, data.longitude, data.accuracy, data.updated_at);
+    setMessage("Sharing is ON. Press “Stop Sharing” to end it at any time.", "success");
+  } catch (err) {
+    if (ownerSession !== session) return;
+    if (err.status === 409 || err.status === 403) {
+      resetState();                    // this number is in use by someone else, or token rejected
+    }
+    setMessage(err.message, "error");
+  } finally {
+    sending = false;
+  }
+}
+
+// ---------- Viewer side: find shared location ----------
+async function findLocation() {
+  const phone = readPhone();
+  if (!phone) return;
+  const code = codeInput.value.trim();
+  if (!/^[0-9]{6}$/.test(code)) {
+    setMessage("Enter the 6-digit share code given by the person sharing their location.", "error");
+    codeInput.focus();
+    return;
+  }
+
+  mode = "viewing";
+  viewSession = { phone: phone, code: code };
+  updateButtons();
+  setStatus("Looking for shared location…", "wait");
+  setMessage("Contacting the server…", "loading");
+
+  await fetchShared();
+  if (mode === "viewing" && timerId === null) {
+    timerId = setInterval(fetchShared, POLL_INTERVAL_MS);
+  }
+}
+
+async function fetchShared() {
+  const session = viewSession;
+  if (mode !== "viewing") return;
+  try {
+    const url = "/api/location/?phone=" + encodeURIComponent(session.phone) +
+                "&code=" + encodeURIComponent(session.code);
+    const data = await api(url);
+    if (viewSession !== session) return;
+    showLocation(data.latitude, data.longitude, data.accuracy, data.updated_at);
+    setStatus("Receiving live location", "ok");
+    setMessage("Viewing a live shared location. It refreshes every few seconds.", "success");
+  } catch (err) {
+    if (viewSession !== session) return;
+    if (err.status) {                  // the server answered with an error: stop polling
+      resetState();
+      setStatus("No active location", "bad");
+      setMessage(err.message, "error");
+    } else {                           // network problem: keep trying
+      setMessage(err.message + " Retrying…", "error");
+    }
+  }
+}
+
+// ---------- Stop button ----------
+async function stopClicked() {
+  if (mode === "viewing") {
+    resetState();
+    setMessage("Stopped viewing.", "success");
+    return;
+  }
+  if (mode === "sharing") {
+    const session = ownerSession;
+    resetState();
+    try {
+      if (session && session.token) await sendStop(session);
+      setMessage("Sharing stopped. Your location was removed from the server.", "success");
+    } catch (err) {
+      setMessage("Sharing stopped here, but the server could not confirm: " + err.message, "error");
+    }
+  }
+}
+
+// ---------- Google Maps button ----------
+function openGoogleMaps() {
+  if (!currentCoords) return;
+  const url = "https://www.google.com/maps?q=" + currentCoords.lat + "," + currentCoords.lng;
+  window.open(url, "_blank", "noopener");
+}
+
+// ---------- Wire everything up ----------
+shareBtn.addEventListener("click", startSharing);
+findBtn.addEventListener("click", findLocation);
+stopBtn.addEventListener("click", stopClicked);
+mapsBtn.addEventListener("click", openGoogleMaps);
+
+// If the page is closed while sharing, try to tell the server to delete the location.
+window.addEventListener("pagehide", () => {
+  if (mode === "sharing" && ownerSession && ownerSession.token) {
+    sendStop(ownerSession, true).catch(() => {});
+  }
+});
+
+initMap();
+resetState();
+const params = new URLSearchParams(window.location.search);
+const linkPhone = params.get("phone");
+const linkCode = params.get("code");
+if (linkPhone && linkCode) {
+  phoneInput.value = linkPhone;
+  codeInput.value = linkCode;
+  findLocation();   // clicks "Find Shared Location" automatically
+}
+
+checkPermission().then((p) => {
+  if (mode === "idle") setStatus("Not sharing (location permission: " + p + ")", "off");
+});
+</script>
+</body>
+</html>

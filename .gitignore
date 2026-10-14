@@ -1,0 +1,13 @@
+# Virtual environment
+.venv/
+
+# Python cache files
+__pycache__/
+*.pyc
+
+# OS-specific junk files
+.DS_Store
+Thumbs.db
+
+# Editor settings (optional, remove if you want to share your VS Code setup)
+.vscode/
